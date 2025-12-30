@@ -1,5 +1,6 @@
 
 # Integrated REST and WebSocket Backend Using Python
+<img width="1536" height="1024" alt="image" src="https://github.com/user-attachments/assets/b8d42fed-5197-41ca-b3fa-60bba985ed59" />
 
 ## Abstract
 
