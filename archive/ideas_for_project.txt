@@ -1,0 +1,10 @@
+OPTION 1 LORA:
+https://docs-mk2.readthedocs.io/en/latest/firmwareapi/pycom/network/lora/
+
+
+
+Method 2 Create a Bluetooth environment to turn on and off device:
+-> Essentially create an environment for elderly people to create an interactive system through their phone
+-> Will use LED lights to sure that the device has been actively turned on/off
+-> Will use the BLEAK and AIOHTTP library to create a simple demonstration
+-> The nordic nRF52-DK will have a thermistor sensor that will send data to the BLEAK program

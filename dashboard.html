@@ -1,0 +1,371 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>WebSocket + REST Dashboard (Demo)</title>
+  <style>
+    :root { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
+    body { margin: 24px; line-height: 1.35; }
+    h1 { margin: 0 0 8px; }
+    .muted { color: #666; font-size: 0.95rem; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px; }
+    .card { border: 1px solid #ddd; border-radius: 12px; padding: 14px; }
+    .card h2 { font-size: 1.05rem; margin: 0 0 10px; }
+    .status { display: inline-flex; align-items: center; gap: 8px; }
+    .dot { width: 10px; height: 10px; border-radius: 999px; background: #999; display: inline-block; }
+    .dot.ok { background: #2e7d32; }
+    .dot.bad { background: #c62828; }
+    label { display:block; font-size: 0.9rem; margin: 8px 0 4px; color: #333; }
+    input, textarea, button, select {
+      width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 10px;
+      font-size: 0.95rem; box-sizing: border-box;
+    }
+    textarea { min-height: 100px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    button { cursor: pointer; background: #111; color: #fff; border: none; }
+    button.secondary { background: #f2f2f2; color: #111; border: 1px solid #ddd; }
+    button:disabled { opacity: 0.6; cursor: not-allowed; }
+    .grid2 { display:grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 8px; border-bottom: 1px solid #eee; vertical-align: top; }
+    th { font-size: 0.85rem; color: #444; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.9rem; }
+    .log { max-height: 340px; overflow: auto; background: #0b0b0b; color: #eaeaea; padding: 10px; border-radius: 10px; }
+    .log .line { margin: 0; white-space: pre-wrap; word-break: break-word; }
+    .small { font-size: 0.85rem; }
+  </style>
+</head>
+<body>
+  <h1>WebSocket + REST Dashboard</h1>
+  <div class="muted">Simple live viewer for <span class="mono">/ws</span> events + device state (demo).</div>
+
+  <div class="card" style="margin-top:16px;">
+    <div class="grid2">
+      <div>
+        <div class="status">
+          <span id="dot" class="dot"></span>
+          <div>
+            <div><strong>Status:</strong> <span id="statusText">Disconnected</span></div>
+            <div class="muted small">Messages: <span id="msgCount">0</span></div>
+          </div>
+        </div>
+      </div>
+      <div style="display:flex; gap:10px; align-items:flex-end;">
+        <div style="flex:1;">
+          <label for="wsUrl">WebSocket URL</label>
+          <input id="wsUrl" value="ws://127.0.0.1:8000/ws" />
+        </div>
+        <div style="width:160px;">
+          <button id="btnConnect">Connect</button>
+          <button id="btnDisconnect" class="secondary" style="margin-top:8px;" disabled>Disconnect</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="card">
+      <h2>Device State (from broadcasts)</h2>
+      <table>
+        <thead>
+          <tr>
+            <th style="width:22%;">Device ID</th>
+            <th>Value</th>
+            <th style="width:30%;">Updated (UTC)</th>
+          </tr>
+        </thead>
+        <tbody id="stateBody">
+          <tr><td colspan="3" class="muted">No data yet.</td></tr>
+        </tbody>
+      </table>
+      <div class="muted small" style="margin-top:8px;">
+        This table updates on <span class="mono">type: "data_update"</span> events and also on the initial <span class="mono">hello</span> snapshot.
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Live Event Log</h2>
+      <div id="log" class="log mono"></div>
+      <div style="display:flex; gap:10px; margin-top:10px;">
+        <button id="btnClear" class="secondary">Clear Log</button>
+        <button id="btnCopy" class="secondary">Copy Log</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="card">
+      <h2>Send Telemetry (WebSocket)</h2>
+      <div class="grid2">
+        <div>
+          <label for="telemetryDevice">device_id</label>
+          <input id="telemetryDevice" value="dashboard_device" />
+        </div>
+        <div>
+          <label for="telemetryValue">value</label>
+          <input id="telemetryValue" value="42" />
+        </div>
+      </div>
+      <button id="btnSendTelemetry" style="margin-top:10px;" disabled>Send Telemetry</button>
+      <button id="btnPing" class="secondary" style="margin-top:10px;" disabled>Ping</button>
+    </div>
+
+    <div class="card">
+      <h2>Send Control (WebSocket)</h2>
+      <div class="grid2">
+        <div>
+          <label for="controlTarget">target</label>
+          <input id="controlTarget" value="device_one" />
+        </div>
+        <div>
+          <label for="controlCommand">command</label>
+          <input id="controlCommand" value="set_threshold" />
+        </div>
+      </div>
+
+      <label for="controlArgs">args (JSON)</label>
+      <textarea id="controlArgs">{ "min": 22.0, "max": 28.0 }</textarea>
+
+      <button id="btnSendControl" style="margin-top:10px;" disabled>Send Control</button>
+      <div class="muted small" style="margin-top:8px;">
+        Note: The server currently broadcasts control events; it doesn’t “apply” them unless a device/client chooses to act on them.
+      </div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:16px;">
+    <h2>Send Raw JSON (WebSocket)</h2>
+    <label for="rawJson">Message</label>
+    <textarea id="rawJson">{ "type": "ping" }</textarea>
+    <button id="btnSendRaw" style="margin-top:10px;" disabled>Send Raw</button>
+  </div>
+
+  <script>
+    const el = (id) => document.getElementById(id);
+
+    const dot = el("dot");
+    const statusText = el("statusText");
+    const msgCountEl = el("msgCount");
+    const logEl = el("log");
+
+    const btnConnect = el("btnConnect");
+    const btnDisconnect = el("btnDisconnect");
+    const btnClear = el("btnClear");
+    const btnCopy = el("btnCopy");
+
+    const btnSendTelemetry = el("btnSendTelemetry");
+    const btnSendControl = el("btnSendControl");
+    const btnSendRaw = el("btnSendRaw");
+    const btnPing = el("btnPing");
+
+    const stateBody = el("stateBody");
+
+    let ws = null;
+    let msgCount = 0;
+
+    // device_id -> { value, updated_at_utc }
+    const state = new Map();
+
+    function setConnected(connected) {
+      dot.classList.remove("ok", "bad");
+      dot.classList.add(connected ? "ok" : "bad");
+      statusText.textContent = connected ? "Connected" : "Disconnected";
+
+      btnDisconnect.disabled = !connected;
+      btnSendTelemetry.disabled = !connected;
+      btnSendControl.disabled = !connected;
+      btnSendRaw.disabled = !connected;
+      btnPing.disabled = !connected;
+    }
+
+    function appendLog(objOrText) {
+      const line = document.createElement("div");
+      line.className = "line";
+      if (typeof objOrText === "string") {
+        line.textContent = objOrText;
+      } else {
+        line.textContent = JSON.stringify(objOrText, null, 2);
+      }
+      logEl.appendChild(line);
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    function renderStateTable() {
+      const entries = Array.from(state.entries())
+        .sort((a, b) => a[0].localeCompare(b[0]));
+
+      stateBody.innerHTML = "";
+
+      if (entries.length === 0) {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `<td colspan="3" class="muted">No data yet.</td>`;
+        stateBody.appendChild(tr);
+        return;
+      }
+
+      for (const [deviceId, data] of entries) {
+        const tr = document.createElement("tr");
+        const valueStr = (typeof data.value === "string")
+          ? data.value
+          : JSON.stringify(data.value);
+        tr.innerHTML = `
+          <td class="mono">${escapeHtml(deviceId)}</td>
+          <td class="mono">${escapeHtml(valueStr)}</td>
+          <td class="mono">${escapeHtml(data.updated_at_utc || "")}</td>
+        `;
+        stateBody.appendChild(tr);
+      }
+    }
+
+    function escapeHtml(s) {
+      return String(s)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    function onMessage(data) {
+      msgCount += 1;
+      msgCountEl.textContent = String(msgCount);
+
+      let obj = null;
+      try {
+        obj = JSON.parse(data);
+      } catch {
+        appendLog("[non-json] " + data);
+        return;
+      }
+
+      appendLog(obj);
+
+      // Update state if event contains snapshot or data_update
+      if (obj.type === "hello" && obj.data_snapshot && typeof obj.data_snapshot === "object") {
+        const snap = obj.data_snapshot;
+        for (const [deviceId, payload] of Object.entries(snap)) {
+          if (payload && typeof payload === "object") {
+            state.set(deviceId, {
+              value: payload.value,
+              updated_at_utc: payload.updated_at_utc || payload.updated_at || ""
+            });
+          }
+        }
+        renderStateTable();
+      }
+
+      if (obj.type === "data_update" && obj.device_id) {
+        state.set(obj.device_id, {
+          value: obj.value,
+          updated_at_utc: obj.timestamp_utc || obj.updated_at_utc || ""
+        });
+        renderStateTable();
+      }
+    }
+
+    function connect() {
+      const url = el("wsUrl").value.trim();
+      if (!url) return;
+
+      appendLog(`--- Connecting to ${url} ---`);
+      ws = new WebSocket(url);
+
+      ws.onopen = () => {
+        setConnected(true);
+        appendLog("--- Connected ---");
+      };
+
+      ws.onclose = () => {
+        setConnected(false);
+        appendLog("--- Disconnected ---");
+        ws = null;
+      };
+
+      ws.onerror = (e) => {
+        appendLog({ type: "error", message: "WebSocket error", detail: String(e) });
+      };
+
+      ws.onmessage = (evt) => onMessage(evt.data);
+    }
+
+    function disconnect() {
+      if (ws) ws.close();
+    }
+
+    function sendJson(obj) {
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      ws.send(JSON.stringify(obj));
+      appendLog({ type: "client_send", ...obj });
+    }
+
+    btnConnect.addEventListener("click", () => {
+      if (ws) return;
+      connect();
+    });
+
+    btnDisconnect.addEventListener("click", () => disconnect());
+
+    btnClear.addEventListener("click", () => {
+      logEl.innerHTML = "";
+      appendLog("--- log cleared ---");
+    });
+
+    btnCopy.addEventListener("click", async () => {
+      const text = Array.from(logEl.querySelectorAll(".line")).map(x => x.textContent).join("\n\n");
+      try {
+        await navigator.clipboard.writeText(text);
+        appendLog("--- log copied to clipboard ---");
+      } catch {
+        appendLog("--- unable to copy (browser permissions) ---");
+      }
+    });
+
+    btnSendTelemetry.addEventListener("click", () => {
+      const device_id = el("telemetryDevice").value.trim();
+      const raw = el("telemetryValue").value;
+
+      // Try to parse numbers/JSON, else keep string
+      let value = raw;
+      try {
+        value = JSON.parse(raw);
+      } catch {
+        const num = Number(raw);
+        if (!Number.isNaN(num) && raw.trim() !== "") value = num;
+      }
+
+      sendJson({ type: "telemetry", device_id, value });
+    });
+
+    btnPing.addEventListener("click", () => sendJson({ type: "ping" }));
+
+    btnSendControl.addEventListener("click", () => {
+      const target = el("controlTarget").value.trim();
+      const command = el("controlCommand").value.trim();
+      let args = {};
+      try {
+        args = JSON.parse(el("controlArgs").value || "{}");
+      } catch (e) {
+        appendLog({ type: "client_error", message: "args JSON invalid", detail: String(e) });
+        return;
+      }
+      // This matches the server’s current behavior: it will echo/echo-type unless you add a WS "control" handler.
+      // Still useful for testing. (REST /api/control is the primary control path.)
+      sendJson({ type: "control", target, command, args });
+    });
+
+    btnSendRaw.addEventListener("click", () => {
+      try {
+        const obj = JSON.parse(el("rawJson").value);
+        sendJson(obj);
+      } catch (e) {
+        appendLog({ type: "client_error", message: "raw JSON invalid", detail: String(e) });
+      }
+    });
+
+    // initial UI state
+    setConnected(false);
+    dot.classList.remove("ok");
+    dot.classList.add("bad");
+  </script>
+</body>
+</html>
